@@ -1,20 +1,21 @@
 name: Publish site
 
 on:
+  workflow_run:
+    workflows: ["Build container"]
+    types: [completed]
   push:
     branches: [main]
     paths-ignore:
       - Dockerfile
       - .github/workflows/container.yml
-  workflow_run:
-    workflows: ["Build container"]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  packages: read
 
 jobs:
   build-deploy:
