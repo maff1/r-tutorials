@@ -1,0 +1,35 @@
+name: Publish site
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - Dockerfile
+      - .github/workflows/container.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    container:
+      image: ghcr.io/maff1/r-quarto:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render site
+        run: quarto render
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        uses: actions/deploy-pages@v4
