@@ -388,7 +388,9 @@ modelsummary(
 #| fig-height: 10
 #| dpi: 300
 #| out-width: "100%"
-performance::check_model(m_lmm_slope)
+
+cm <- performance::check_model(m_lmm_slope)
+plot(cm, n_columns = 2)
 ```
 
 ## Interpretation
