@@ -386,7 +386,12 @@ modelsummary(
 ```{r}
 #| fig-width: 8
 #| fig-height: 6
-performance::check_model(m_lmm_slope, panel = FALSE)
+
+plots <- performance::check_model(m_lmm_slope, panel = FALSE)
+
+for (p in plots) {
+  print(p)
+}
 ```
 
 ## Interpretation
