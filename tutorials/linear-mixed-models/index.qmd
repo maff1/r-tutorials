@@ -384,14 +384,11 @@ modelsummary(
 ## Diagnostics
 
 ```{r}
-#| fig-width: 8
-#| fig-height: 6
-
-plots <- performance::check_model(m_lmm_slope, panel = FALSE)
-
-for (p in plots) {
-  print(p)
-}
+#| fig-width: 14
+#| fig-height: 10
+#| dpi: 300
+#| out-width: "100%"
+performance::check_model(m_lmm_slope)
 ```
 
 ## Interpretation
