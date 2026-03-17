@@ -17,9 +17,9 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libcairo2-dev \
     libxt-dev \
-    libglpk40 \
     make \
     g++ \
+    gfortran \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.8.24/quarto-1.8.24-linux-amd64.deb && \
@@ -29,25 +29,33 @@ RUN wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.8.24/quar
 RUN Rscript -e "install.packages(c( \
     'knitr', \
     'rmarkdown', \
-    'tidyverse' \
-  ), repos = 'https://cloud.r-project.org')"
-
-RUN Rscript -e "install.packages(c( \
-    'lme4', \
-    'lmerTest', \
-    'nlme', \
+    'tidyverse', \
+    'ggplot2', \
+    'cowplot', \
+    'patchwork', \
     'broom', \
     'broom.mixed', \
-    'patchwork', \
-    'cowplot', \
     'performance', \
     'parameters', \
     'see', \
     'ggeffects', \
     'emmeans', \
     'modelsummary', \
-    'sjPlot', \
+    'sjPlot' \
+  ), repos = 'https://cloud.r-project.org')"
+
+RUN Rscript -e "install.packages(c( \
+    'Rcpp', \
+    'RcppEigen', \
+    'Matrix', \
+    'nlme', \
+    'lme4', \
+    'lmerTest', \
     'DHARMa' \
   ), repos = 'https://cloud.r-project.org')"
+
+RUN Rscript -e "stopifnot(requireNamespace('lme4', quietly = TRUE))" && \
+    Rscript -e "stopifnot(requireNamespace('lmerTest', quietly = TRUE))" && \
+    Rscript -e "stopifnot(requireNamespace('DHARMa', quietly = TRUE))"
 
 WORKDIR /workspace
