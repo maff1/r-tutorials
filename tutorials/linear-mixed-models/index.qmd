@@ -47,35 +47,35 @@ source("scripts/simulate_lmm_data.R")
 
 For independent observations, the linear model can be written as
 
-\[
+$$
 y_i = \beta_0 + \beta_1 x_i + \varepsilon_i
-\]
+$$
 
 where
 
-\[
+$$
 \varepsilon_i \sim N(0, \sigma^2)
-\]
+$$
 
 The key assumption is that the residuals are independent.
 
 In matrix notation, this becomes
 
-\[
+$$
 \mathbf{y} = \mathbf{X}\boldsymbol{\beta} + \boldsymbol{\varepsilon}
-\]
+$$
 
 with
 
-\[
+$$
 \boldsymbol{\varepsilon} \sim N(\mathbf{0}, \sigma^2 \mathbf{I})
-\]
+$$
 
 Therefore,
 
-\[
+$$
 \mathrm{Var}(\mathbf{y}) = \sigma^2 \mathbf{I}
-\]
+$$
 
 This means that all observations have the same variance and are mutually uncorrelated.
 
@@ -85,9 +85,9 @@ Suppose subject \(j\) is measured several times, with observation \(i\) indexing
 
 If we ignore that dependence and fit
 
-\[
+$$
 y_{ij} = \beta_0 + \beta_1 x_{ij} + \varepsilon_{ij}
-\]
+$$
 
 as though all observations were independent, standard errors and inferential results may be misleading.
 
@@ -95,9 +95,9 @@ as though all observations were independent, standard errors and inferential res
 
 A random-intercept mixed model is
 
-\[
+$$
 y_{ij} = \beta_0 + \beta_1 x_{ij} + b_{0j} + \varepsilon_{ij}
-\]
+$$
 
 where:
 
@@ -108,11 +108,11 @@ where:
 
 Assume
 
-\[
+$$
 b_{0j} \sim N(0, \tau_0^2)
 \qquad \text{and} \qquad
 \varepsilon_{ij} \sim N(0, \sigma^2)
-\]
+$$
 
 This allows each subject to have their own baseline level while sharing a common slope.
 
@@ -120,15 +120,15 @@ This allows each subject to have their own baseline level while sharing a common
 
 If subjects also differ in how they change with \(x\), then we can write
 
-\[
+$$
 y_{ij} = \beta_0 + \beta_1 x_{ij} + b_{0j} + b_{1j}x_{ij} + \varepsilon_{ij}
-\]
+$$
 
 where \(b_{1j}\) is a subject-specific random slope.
 
 We assume
 
-\[
+$$
 \begin{pmatrix}
 b_{0j} \\
 b_{1j}
@@ -142,17 +142,17 @@ N
 \end{pmatrix},
 \mathbf{G}
 \right)
-\]
+$$
 
 with
 
-\[
+$$
 \mathbf{G} =
 \begin{pmatrix}
 \tau_0^2 & \tau_{01} \\
 \tau_{01} & \tau_1^2
 \end{pmatrix}
-\]
+$$
 
 This means that each subject can have both their own baseline and their own trajectory.
 
@@ -160,9 +160,9 @@ This means that each subject can have both their own baseline and their own traj
 
 The linear mixed model can be written as
 
-\[
+$$
 \mathbf{y} = \mathbf{X}\boldsymbol{\beta} + \mathbf{Z}\mathbf{b} + \boldsymbol{\varepsilon}
-\]
+$$
 
 where:
 
@@ -171,23 +171,23 @@ where:
 
 Assume
 
-\[
+$$
 \mathbf{b} \sim N(\mathbf{0}, \mathbf{G})
 \qquad \text{and} \qquad
 \boldsymbol{\varepsilon} \sim N(\mathbf{0}, \mathbf{R})
-\]
+$$
 
 Then
 
-\[
+$$
 \mathrm{Var}(\mathbf{y}) = \mathbf{Z}\mathbf{G}\mathbf{Z}^{\top} + \mathbf{R}
-\]
+$$
 
 This is the key difference from the ordinary linear model, where
 
-\[
+$$
 \mathrm{Var}(\mathbf{y}) = \sigma^2 \mathbf{I}
-\]
+$$
 
 In other words, the mixed model explicitly accounts for covariance induced by clustering or repeated measurements.
 
