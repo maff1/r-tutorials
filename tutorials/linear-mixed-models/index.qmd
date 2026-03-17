@@ -81,7 +81,7 @@ This means that all observations have the same variance and are mutually uncorre
 
 ### Why this becomes problematic for repeated measures
 
-Suppose subject \(j\) is measured several times, with observation \(i\) indexing repeated measurements within subject. Then two observations from the same subject are usually more similar to each other than two observations from different subjects.
+Suppose subject $j$ is measured several times, with observation $i$ indexing repeated measurements within subject. Then two observations from the same subject are usually more similar to each other than two observations from different subjects.
 
 If we ignore that dependence and fit
 
@@ -101,10 +101,10 @@ $$
 
 where:
 
-- \(\beta_0\) is the population-average intercept
-- \(\beta_1\) is the population-average slope
-- \(b_{0j}\) is the random intercept for subject \(j\)
-- \(\varepsilon_{ij}\) is the residual error
+- $\beta_0$ is the population-average intercept
+- $\beta_1$ is the population-average slope
+- $b_{0j}$ is the random intercept for subject $j$
+- $\varepsilon_{ij}$ is the residual error
 
 Assume
 
@@ -118,13 +118,13 @@ This allows each subject to have their own baseline level while sharing a common
 
 ### Linear mixed model with a random intercept and random slope
 
-If subjects also differ in how they change with \(x\), then we can write
+If subjects also differ in how they change with $x$, then we can write
 
 $$
 y_{ij} = \beta_0 + \beta_1 x_{ij} + b_{0j} + b_{1j}x_{ij} + \varepsilon_{ij}
 $$
 
-where \(b_{1j}\) is a subject-specific random slope.
+where $b_{1j}$ is a subject-specific random slope.
 
 We assume
 
@@ -166,8 +166,8 @@ $$
 
 where:
 
-- \(\mathbf{X}\boldsymbol{\beta}\) is the fixed-effects component
-- \(\mathbf{Z}\mathbf{b}\) is the random-effects component
+- $\mathbf{X}\boldsymbol{\beta}$ is the fixed-effects component
+- $\mathbf{Z}\mathbf{b}$ is the random-effects component
 
 Assume
 
@@ -384,7 +384,9 @@ modelsummary(
 ## Diagnostics
 
 ```{r}
-performance::check_model(m_lmm_slope)
+#| fig-width: 8
+#| fig-height: 6
+performance::check_model(m_lmm_slope, panel = FALSE)
 ```
 
 ## Interpretation
