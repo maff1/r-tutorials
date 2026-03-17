@@ -18,9 +18,6 @@ permissions:
   id-token: write
   packages: read
 
-env:
-  IMAGE_NAME: ghcr.io/maff1/r-quarto:latest
-
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -31,10 +28,11 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success')
+
     runs-on: ubuntu-latest
 
     container:
-      image: ${{ env.IMAGE_NAME }}
+      image: ghcr.io/maff1/r-quarto:latest
 
     steps:
       - name: Check out repository
