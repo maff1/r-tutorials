@@ -28,7 +28,6 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success')
-
     runs-on: ubuntu-latest
 
     container:
@@ -40,6 +39,20 @@ jobs:
 
       - name: Check Quarto version
         run: quarto --version
+
+      - name: Check R version
+        run: R --version
+
+      - name: Verify required R packages
+        run: |
+          Rscript -e "cat('tidyverse: ', requireNamespace('tidyverse', quietly = TRUE), '\n')"
+          Rscript -e "cat('lme4: ', requireNamespace('lme4', quietly = TRUE), '\n')"
+          Rscript -e "cat('cowplot: ', requireNamespace('cowplot', quietly = TRUE), '\n')"
+          Rscript -e "cat('ggeffects: ', requireNamespace('ggeffects', quietly = TRUE), '\n')"
+          Rscript -e "stopifnot(requireNamespace('tidyverse', quietly = TRUE))"
+          Rscript -e "stopifnot(requireNamespace('lme4', quietly = TRUE))"
+          Rscript -e "stopifnot(requireNamespace('cowplot', quietly = TRUE))"
+          Rscript -e "stopifnot(requireNamespace('ggeffects', quietly = TRUE))"
 
       - name: Render site
         run: quarto render
