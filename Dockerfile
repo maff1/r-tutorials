@@ -17,9 +17,13 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libcairo2-dev \
     libxt-dev \
+    libglpk40 \
     make \
     g++ \
     gfortran \
+    cmake \
+    pkg-config \
+    libnlopt-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.8.24/quarto-1.8.24-linux-amd64.deb && \
@@ -41,20 +45,22 @@ RUN Rscript -e "install.packages(c( \
     'ggeffects', \
     'emmeans', \
     'modelsummary', \
-    'sjPlot' \
-  ), repos = 'https://cloud.r-project.org')"
+    'sjPlot', \
+    'nlme' \
+  ), repos = 'https://cloud.r-project.org', Ncpus = parallel::detectCores())"
 
 RUN Rscript -e "install.packages(c( \
+    'nloptr', \
     'Rcpp', \
     'RcppEigen', \
     'Matrix', \
-    'nlme', \
     'lme4', \
     'lmerTest', \
     'DHARMa' \
-  ), repos = 'https://cloud.r-project.org')"
+  ), repos = 'https://cloud.r-project.org', Ncpus = parallel::detectCores())"
 
-RUN Rscript -e "stopifnot(requireNamespace('lme4', quietly = TRUE))" && \
+RUN Rscript -e "stopifnot(requireNamespace('nloptr', quietly = TRUE))" && \
+    Rscript -e "stopifnot(requireNamespace('lme4', quietly = TRUE))" && \
     Rscript -e "stopifnot(requireNamespace('lmerTest', quietly = TRUE))" && \
     Rscript -e "stopifnot(requireNamespace('DHARMa', quietly = TRUE))"
 
