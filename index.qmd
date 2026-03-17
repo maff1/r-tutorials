@@ -1,11 +1,15 @@
 ---
-title: "Home"
+title: "R Tutorials"
 ---
 
-## Hello 👋
+## Welcome
 
-Rendered using a container.
+This site contains practical R tutorials for statistics and data analysis, rendered with Quarto and deployed through GitHub Pages.
 
-```{r}
-summary(cars)
-```
+## Available tutorials
+
+- [Linear Models versus Linear Mixed Models](tutorials/linear-mixed-models/index.html)
+
+## About
+
+These tutorials are designed to be reproducible, visually clear, and suitable for self-study or teaching.

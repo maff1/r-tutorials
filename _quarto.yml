@@ -2,8 +2,17 @@ project:
   type: website
 
 website:
-  title: "Container Test"
+  title: "R Tutorials"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: tutorials/index.qmd
+        text: Tutorials
 
 format:
   html:
     theme: cosmo
+    toc: true
+    number-sections: true
+    css: assets/css/styles.css

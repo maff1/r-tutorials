@@ -1,14 +1,15 @@
 name: Publish site
 
 on:
-  workflow_run:
-    workflows: ["Build container"]
-    types: [completed]
   push:
     branches: [main]
     paths-ignore:
       - Dockerfile
+      - .dockerignore
       - .github/workflows/container.yml
+  workflow_run:
+    workflows: ["Build container"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,13 @@ permissions:
   pages: write
   id-token: write
   packages: read
+
+env:
+  IMAGE_NAME: ghcr.io/maff1/r-quarto:latest
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
   build-deploy:
@@ -26,18 +34,22 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: ghcr.io/maff1/r-quarto:latest
+      image: ${{ env.IMAGE_NAME }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check Quarto version
+        run: quarto --version
 
       - name: Render site
         run: quarto render
 
-      - name: Upload
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4

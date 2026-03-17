@@ -1,0 +1,9 @@
+.git
+.github
+_site
+docs
+*.html
+*.Rproj
+.Rhistory
+.Ruserdata
+renv/library

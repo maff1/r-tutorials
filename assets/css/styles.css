@@ -1,0 +1,11 @@
+body {
+  line-height: 1.6;
+}
+
+.quarto-title-block .title {
+  font-weight: 700;
+}
+
+p {
+  margin-bottom: 0.9rem;
+}
