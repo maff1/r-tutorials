@@ -385,7 +385,7 @@ modelsummary(
 
 ```{r}
 #| fig-width: 14
-#| fig-height: 10
+#| fig-height: 14
 #| dpi: 300
 #| out-width: "100%"
 
