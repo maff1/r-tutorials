@@ -1,0 +1,340 @@
+---
+title: "Outlier identification and treatment in R with `performance` and capping"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+This document shows a practical workflow for outlier identification in R using the `performance` package, followed by treatment options with a focus on capping. The workflow is designed for continuous variables.
+
+The recommended sequence is:
+
+1. identify candidate outliers using `performance::check_outliers()`
+2. review which rows and variables are affected
+3. create a capped version of selected variables
+4. compare descriptive summaries before and after capping
+5. refit the model on the treated dataset as a sensitivity analysis
+
+## Libraries
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(ggplot2)
+  library(performance)
+  library(lme4)
+})
+```
+
+## Example data
+
+Replace this section with your own dataset if needed.
+
+```{r}
+set.seed(123)
+
+n_subjects <- 300
+n_time <- 6
+
+subject_df <- tibble(
+  subject = factor(seq_len(n_subjects)),
+  age = rnorm(n_subjects, mean = 55, sd = 10),
+  bmi = rnorm(n_subjects, mean = 27, sd = 4),
+  b0 = rnorm(n_subjects, mean = 0, sd = 5),
+  b1 = rnorm(n_subjects, mean = 0, sd = 1.0)
+)
+
+df <- expand_grid(
+  subject = factor(seq_len(n_subjects)),
+  time = 0:(n_time - 1)
+) |>
+  left_join(subject_df, by = "subject") |>
+  mutate(
+    biomarker = 50 + 1.8 * time + 0.20 * age + 0.35 * bmi + b0 + b1 * time + rnorm(n(), 0, 2)
+  )
+
+# add a few artificial extreme values for demonstration
+set.seed(999)
+idx_biomarker <- sample(seq_len(nrow(df)), size = 12)
+df$biomarker[idx_biomarker] <- df$biomarker[idx_biomarker] + rnorm(length(idx_biomarker), mean = 35, sd = 8)
+
+idx_bmi <- sample(seq_len(nrow(df)), size = 8)
+df$bmi[idx_bmi] <- df$bmi[idx_bmi] + 18
+
+glimpse(df)
+```
+
+## Variables to screen for outliers
+
+Outlier detection should usually be limited to continuous variables that are scientifically plausible candidates for extreme values.
+
+```{r}
+vars_to_check <- c("biomarker", "age", "bmi", "time")
+```
+
+## Identify outliers with `performance::check_outliers()`
+
+This version uses only the robust z-score method, which avoids extra package dependencies.
+
+```{r}
+outlier_result <- check_outliers(
+  df[, vars_to_check],
+  method = "zscore_robust"
+)
+
+outlier_result
+```
+
+## Optional plot of the outlier result
+
+If the `see` package is installed, `plot()` can visualise the outlier result.
+
+```{r}
+if (requireNamespace("see", quietly = TRUE)) {
+  plot(outlier_result)
+}
+```
+
+## Extract row level outlier information
+
+```{r}
+outlier_df <- as.data.frame(outlier_result)
+
+head(outlier_df)
+```
+
+## Append outlier flags back to the dataset
+
+For a single method, `Outlier` is typically a logical flag or a 0/1 style indicator.
+
+```{r}
+df_flagged <- df |>
+  mutate(
+    row_id = seq_len(n()),
+    outlier_flag_raw = outlier_df$Outlier,
+    is_outlier = as.logical(outlier_flag_raw)
+  )
+
+df_flagged |>
+  count(is_outlier)
+```
+
+## Inspect candidate outliers
+
+```{r}
+candidate_outliers <- df_flagged |>
+  filter(is_outlier) |>
+  select(row_id, subject, time, all_of(vars_to_check)) |>
+  arrange(subject, time)
+
+candidate_outliers
+```
+
+## Simple visual checks
+
+### Histogram of the main variable
+
+```{r}
+ggplot(df_flagged, aes(x = biomarker)) +
+  geom_histogram(bins = 40) +
+  labs(
+    title = "Distribution of biomarker before treatment",
+    x = "Biomarker",
+    y = "Count"
+  )
+```
+
+### Boxplot with flagged rows highlighted
+
+```{r}
+ggplot(df_flagged, aes(x = "", y = biomarker, colour = is_outlier)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.12, alpha = 0.5) +
+  labs(
+    title = "Biomarker values with outlier flags",
+    x = NULL,
+    y = "Biomarker"
+  )
+```
+
+### Scatter plot over time with flagged rows highlighted
+
+```{r}
+ggplot(df_flagged, aes(x = time, y = biomarker, colour = is_outlier)) +
+  geom_point(alpha = 0.6) +
+  labs(
+    title = "Biomarker over time with flagged rows highlighted",
+    x = "Time",
+    y = "Biomarker"
+  )
+```
+
+## Capping function
+
+This helper applies percentile-based capping, also called winsorisation. Values below the lower percentile are set to the lower bound, and values above the upper percentile are set to the upper bound.
+
+```{r}
+cap_percentile <- function(x, probs = c(0.01, 0.99), na.rm = TRUE) {
+  stopifnot(is.numeric(x), length(probs) == 2)
+  qs <- quantile(x, probs = probs, na.rm = na.rm, names = FALSE)
+  pmin(pmax(x, qs[1]), qs[2])
+}
+```
+
+## Apply capping to selected variables
+
+Here the example caps `biomarker` and `bmi` at the 1st and 99th percentiles.
+
+```{r}
+df_capped <- df_flagged |>
+  mutate(
+    biomarker_capped = cap_percentile(biomarker, probs = c(0.01, 0.99)),
+    bmi_capped = cap_percentile(bmi, probs = c(0.01, 0.99))
+  )
+```
+
+## Compare before and after capping
+
+```{r}
+comparison_tab <- tibble(
+  variable = c("biomarker", "biomarker_capped", "bmi", "bmi_capped"),
+  min = c(
+    min(df_capped$biomarker, na.rm = TRUE),
+    min(df_capped$biomarker_capped, na.rm = TRUE),
+    min(df_capped$bmi, na.rm = TRUE),
+    min(df_capped$bmi_capped, na.rm = TRUE)
+  ),
+  p01 = c(
+    quantile(df_capped$biomarker, 0.01, na.rm = TRUE),
+    quantile(df_capped$biomarker_capped, 0.01, na.rm = TRUE),
+    quantile(df_capped$bmi, 0.01, na.rm = TRUE),
+    quantile(df_capped$bmi_capped, 0.01, na.rm = TRUE)
+  ),
+  median = c(
+    median(df_capped$biomarker, na.rm = TRUE),
+    median(df_capped$biomarker_capped, na.rm = TRUE),
+    median(df_capped$bmi, na.rm = TRUE),
+    median(df_capped$bmi_capped, na.rm = TRUE)
+  ),
+  p99 = c(
+    quantile(df_capped$biomarker, 0.99, na.rm = TRUE),
+    quantile(df_capped$biomarker_capped, 0.99, na.rm = TRUE),
+    quantile(df_capped$bmi, 0.99, na.rm = TRUE),
+    quantile(df_capped$bmi_capped, 0.99, na.rm = TRUE)
+  ),
+  max = c(
+    max(df_capped$biomarker, na.rm = TRUE),
+    max(df_capped$biomarker_capped, na.rm = TRUE),
+    max(df_capped$bmi, na.rm = TRUE),
+    max(df_capped$bmi_capped, na.rm = TRUE)
+  )
+)
+
+comparison_tab
+```
+
+## Plot before and after capping
+
+### Biomarker
+
+```{r}
+plot_bio <- df_capped |>
+  select(biomarker, biomarker_capped) |>
+  pivot_longer(everything(), names_to = "version", values_to = "value")
+
+ggplot(plot_bio, aes(x = value)) +
+  geom_histogram(bins = 40) +
+  facet_wrap(~ version, scales = "free_y") +
+  labs(
+    title = "Biomarker before and after capping",
+    x = "Value",
+    y = "Count"
+  )
+```
+
+### BMI
+
+```{r}
+plot_bmi <- df_capped |>
+  select(bmi, bmi_capped) |>
+  pivot_longer(everything(), names_to = "version", values_to = "value")
+
+ggplot(plot_bmi, aes(x = value)) +
+  geom_histogram(bins = 40) +
+  facet_wrap(~ version, scales = "free_y") +
+  labs(
+    title = "BMI before and after capping",
+    x = "Value",
+    y = "Count"
+  )
+```
+
+## Optional model sensitivity analysis
+
+A good practice is to compare the substantive model fitted to the original and capped datasets.
+
+```{r}
+fit_original <- lmer(
+  biomarker ~ time + age + bmi + (time | subject),
+  data = df_capped,
+  REML = FALSE
+)
+
+fit_capped <- lmer(
+  biomarker_capped ~ time + age + bmi_capped + (time | subject),
+  data = df_capped,
+  REML = FALSE
+)
+
+coef_tab <- tibble(
+  term = names(fixef(fit_original)),
+  estimate_original = unname(fixef(fit_original)),
+  estimate_capped = unname(fixef(fit_capped)),
+  delta = estimate_capped - estimate_original
+)
+
+coef_tab
+```
+
+## Alternative treatment options
+
+Capping is only one treatment strategy. Depending on the analysis plan and subject matter context, alternatives include:
+
+- leaving values unchanged but documenting influence
+- transforming variables, for example using a log transform
+- setting implausible values to missing and using an appropriate missing-data strategy
+- removing clearly erroneous records after documented review
+
+## Minimal adaptation to your own data
+
+For your own dataset, you would usually only need to change:
+
+```{r eval=FALSE}
+vars_to_check <- c("outcome", "covariate1", "covariate2")
+
+outlier_result <- check_outliers(
+  mydata[, vars_to_check],
+  method = "zscore_robust"
+)
+
+mydata2 <- mydata |>
+  mutate(
+    outcome_capped = cap_percentile(outcome, probs = c(0.01, 0.99)),
+    covariate1_capped = cap_percentile(covariate1, probs = c(0.01, 0.99))
+  )
+```
+
+## Reporting text
+
+You can use the following wording in a methods section:
+
+Potential outliers were screened using `performance::check_outliers()` with the robust z-score method. As a sensitivity analysis, selected continuous variables were capped at the 1st and 99th percentiles, and the substantive model was refitted using the capped variables.

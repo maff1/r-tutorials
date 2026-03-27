@@ -1,0 +1,305 @@
+---
+title: "Model Sensitivity Analysis with lmer"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+This document implements a leave one subject out sensitivity analysis for a linear mixed effects model fitted with `lmer`. The primary diagnostic is **likelihood distance**, which quantifies the global influence of each subject on the fitted model. Supporting diagnostics are **DFBETAS** for the fixed effect of `time` and **delta AIC**.
+
+The example data are simulated with repeated measures over time and subject specific random intercepts and random slopes.
+
+## Libraries
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(lme4)
+  library(ggplot2)
+})
+```
+
+## Example data
+
+```{r}
+set.seed(123)
+
+n_subjects <- 30
+n_time <- 6
+
+subject_df <- tibble(
+  subject = factor(1:n_subjects),
+  b0 = rnorm(n_subjects, mean = 0, sd = 6),
+  b1 = rnorm(n_subjects, mean = 0, sd = 1.2)
+)
+
+df <- expand_grid(
+  subject = factor(1:n_subjects),
+  time = 0:(n_time - 1)
+) |>
+  left_join(subject_df, by = "subject") |>
+  mutate(
+    y = 20 + 2.5 * time + b0 + b1 * time + rnorm(n(), mean = 0, sd = 2)
+  )
+
+glimpse(df)
+```
+
+## Full model
+
+Because the data were simulated with both subject specific intercepts and subject specific slopes, the appropriate model is:
+
+```{r}
+fit_full <- lmer(
+  y ~ time + (time | subject),
+  data = df,
+  REML = FALSE
+)
+
+summary(fit_full)
+```
+
+## Leave one subject out sensitivity analysis
+
+### Rationale
+
+For each subject, all rows belonging to that subject are removed and the same model is refitted. Three diagnostics are then calculated:
+
+1. **Likelihood distance**  
+   \[
+   D_i = 2 \left[ \ell_{\mathrm{full}} - \ell_{(-i)} \right]
+   \]
+
+2. **DFBETAS for the fixed effect of time**  
+   \[
+   \mathrm{DFBETAS}_i = \frac{\hat\beta_{\mathrm{full}} - \hat\beta_{(-i)}}{\mathrm{SE}(\hat\beta_{\mathrm{full}})}
+   \]
+
+3. **Delta AIC**  
+   \[
+   \Delta \mathrm{AIC}_i = \mathrm{AIC}_{(-i)} - \mathrm{AIC}_{\mathrm{full}}
+   \]
+
+Likelihood distance is the primary diagnostic because it reflects the global effect of deleting a subject on the whole mixed model.
+
+### Implementation
+
+```{r}
+term_of_interest <- "time"
+ids <- unique(df$subject)
+
+beta_full   <- fixef(fit_full)[term_of_interest]
+se_full     <- sqrt(diag(vcov(fit_full)))[term_of_interest]
+logLik_full <- as.numeric(logLik(fit_full))
+AIC_full    <- AIC(fit_full)
+
+loo_results <- lapply(ids, function(id) {
+  df_sub <- df |> filter(subject != id)
+
+  fit_loo <- lmer(
+    y ~ time + (time | subject),
+    data = df_sub,
+    REML = FALSE
+  )
+
+  beta_loo   <- fixef(fit_loo)[term_of_interest]
+  se_loo     <- sqrt(diag(vcov(fit_loo)))[term_of_interest]
+  logLik_loo <- as.numeric(logLik(fit_loo))
+  AIC_loo    <- AIC(fit_loo)
+
+  tibble(
+    subject = as.character(id),
+    n_rows_removed = sum(df$subject == id),
+    beta_full = beta_full,
+    beta_loo = beta_loo,
+    se_full = se_full,
+    se_loo = se_loo,
+    ci_low_loo = beta_loo - 1.96 * se_loo,
+    ci_high_loo = beta_loo + 1.96 * se_loo,
+    delta_beta = beta_full - beta_loo,
+    pct_change_beta = 100 * (beta_loo - beta_full) / beta_full,
+    dfbetas_time = (beta_full - beta_loo) / se_full,
+    delta_logLik = logLik_full - logLik_loo,
+    likelihood_distance = 2 * (logLik_full - logLik_loo),
+    AIC_full = AIC_full,
+    AIC_loo = AIC_loo,
+    delta_AIC = AIC_loo - AIC_full
+  )
+}) |>
+  bind_rows()
+
+loo_results
+```
+
+## Thresholds for flagging potentially influential subjects
+
+```{r}
+dfbetas_threshold <- 2 / sqrt(length(ids))
+
+n_fixed <- length(fixef(fit_full))
+likelihood_threshold <- qchisq(0.95, df = n_fixed)
+
+aic_threshold <- -2
+
+thresholds <- tibble(
+  metric = c("DFBETAS", "Likelihood distance", "Delta AIC"),
+  threshold = c(dfbetas_threshold, likelihood_threshold, aic_threshold),
+  interpretation = c(
+    "Absolute DFBETAS above threshold suggests influence on the fixed effect of time",
+    "Values above threshold suggest influential subjects globally",
+    "Values below threshold suggest that removing the subject improves AIC materially"
+  )
+)
+
+thresholds
+```
+
+## Flag subjects
+
+```{r}
+loo_results <- loo_results |>
+  mutate(
+    flag_dfbetas = abs(dfbetas_time) > dfbetas_threshold,
+    flag_likelihood = likelihood_distance > likelihood_threshold,
+    flag_aic = delta_AIC < aic_threshold,
+    n_flags = flag_dfbetas + flag_likelihood + flag_aic
+  ) |>
+  arrange(desc(n_flags), desc(abs(dfbetas_time)))
+
+loo_results
+```
+
+## Potentially problematic subjects
+
+```{r}
+problematic_ids <- loo_results |>
+  filter(n_flags > 0) |>
+  select(
+    subject,
+    beta_loo,
+    ci_low_loo,
+    ci_high_loo,
+    delta_beta,
+    pct_change_beta,
+    dfbetas_time,
+    delta_logLik,
+    likelihood_distance,
+    delta_AIC,
+    flag_dfbetas,
+    flag_likelihood,
+    flag_aic,
+    n_flags
+  ) |>
+  arrange(desc(n_flags), desc(abs(dfbetas_time)))
+
+problematic_ids
+```
+
+## Overall summary
+
+```{r}
+summary_tab <- loo_results |>
+  summarise(
+    full_beta_time = first(beta_full),
+    min_beta_loo = min(beta_loo),
+    max_beta_loo = max(beta_loo),
+    max_abs_pct_change = max(abs(pct_change_beta)),
+    max_abs_dfbetas = max(abs(dfbetas_time)),
+    max_likelihood_distance = max(likelihood_distance),
+    min_delta_AIC = min(delta_AIC),
+    n_flagged_dfbetas = sum(flag_dfbetas),
+    n_flagged_likelihood = sum(flag_likelihood),
+    n_flagged_aic = sum(flag_aic),
+    n_flagged_any = sum(n_flags > 0)
+  )
+
+summary_tab
+```
+
+## Plots
+
+### DFBETAS for the fixed effect of time
+
+```{r}
+ggplot(loo_results, aes(x = reorder(subject, dfbetas_time), y = dfbetas_time)) +
+  geom_point() +
+  geom_hline(yintercept = c(-dfbetas_threshold, dfbetas_threshold), linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "DFBETAS for time",
+    title = "Leave one subject out influence on the fixed effect of time"
+  )
+```
+
+### Likelihood distance
+
+```{r}
+ggplot(loo_results, aes(x = reorder(subject, likelihood_distance), y = likelihood_distance)) +
+  geom_point() +
+  geom_hline(yintercept = likelihood_threshold, linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "Likelihood distance",
+    title = "Leave one subject out global influence on the mixed model"
+  )
+```
+
+### Delta AIC
+
+```{r}
+ggplot(loo_results, aes(x = reorder(subject, delta_AIC), y = delta_AIC)) +
+  geom_point() +
+  geom_hline(yintercept = c(-2, 2), linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "Delta AIC (LOO minus full)",
+    title = "Leave one subject out change in AIC"
+  )
+```
+
+### Stability of the fixed effect for time
+
+```{r}
+ggplot(loo_results, aes(x = reorder(subject, beta_loo), y = beta_loo)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = ci_low_loo, ymax = ci_high_loo), width = 0) +
+  geom_hline(yintercept = beta_full, linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "Estimated fixed effect for time",
+    title = "Stability of the time effect under leave one subject out refits"
+  )
+```
+
+## Interpretation
+
+The recommended interpretation is:
+
+- **Primary diagnostic:** likelihood distance
+- **Supporting diagnostics:** DFBETAS for `time` and delta AIC
+- Subjects flagged by more than one criterion are the strongest candidates for being disproportionately influential
+
+In this framework:
+
+- large **likelihood distance** suggests that removing the subject meaningfully changes the fitted model overall
+- large absolute **DFBETAS** suggests that the subject strongly affects the estimated fixed effect of `time`
+- strongly negative **delta AIC** suggests that model fit improves when the subject is removed
+
+## Reporting text
+
+You can use the following in a methods section:
+
+Sensitivity analysis was performed using a leave one subject out procedure. The linear mixed effects model `y ~ time + (time | subject)` was re fitted after excluding each subject in turn. Global influence was assessed using case deletion likelihood distance. DFBETAS for the fixed effect of time and changes in AIC were used as supporting diagnostics. Subjects exceeding the prespecified thresholds were considered potentially influential.

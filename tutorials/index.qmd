@@ -7,6 +7,9 @@ title: "Tutorials"
 ### Statistics
 
 - [Linear Models versus Linear Mixed Models](linear-mixed-models/index.html)
+- [Model Sensitivity Analysis with lmer](model-sensitivity/index.html)
+- [Model Sensitivity Analysis Parallel](model-sensitivity-parallel/index.html)
+- [Outlier identification and treatment](outliers/index.html)
 
 ### Coming soon
 

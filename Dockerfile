@@ -35,6 +35,7 @@ RUN Rscript -e "install.packages(c( \
     'rmarkdown', \
     'tidyverse', \
     'ggplot2', \
+    'ggrepel', \
     'cowplot', \
     'patchwork', \
     'broom', \

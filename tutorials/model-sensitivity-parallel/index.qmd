@@ -1,0 +1,395 @@
+---
+title: "Fast leave one subject out sensitivity analysis for `lmer` using `mclapply`"
+format:
+  html:
+    toc: true
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+This document implements a fast leave one subject out sensitivity analysis for a linear mixed effects model fitted with `lmer`, using `parallel::mclapply` for parallel refitting on Linux systems.
+
+The primary diagnostic is **likelihood distance**, which measures the global influence of each subject on the fitted model. Supporting diagnostics are **DFBETAS** for the fixed effect of interest and **delta AIC**.
+
+This version is appropriate for a Linux HPC interactive session, for example JupyterLab with an R kernel running inside a Slurm allocation.
+
+## Libraries
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tibble)
+  library(tidyr)
+  library(lme4)
+  library(ggplot2)
+  library(parallel)
+})
+```
+
+## Example data
+
+Replace this section with your real dataset as needed.
+
+```{r}
+set.seed(123)
+
+n_subjects <- 2000
+n_time <- 6
+
+subject_df <- tibble(
+  subject = factor(seq_len(n_subjects)),
+  b0 = rnorm(n_subjects, mean = 0, sd = 6),
+  b1 = rnorm(n_subjects, mean = 0, sd = 1.2),
+  age = rnorm(n_subjects, mean = 55, sd = 10),
+  sex = factor(sample(c("F", "M"), n_subjects, replace = TRUE))
+)
+
+df <- expand_grid(
+  subject = factor(seq_len(n_subjects)),
+  time = 0:(n_time - 1)
+) |>
+  left_join(subject_df, by = "subject") |>
+  mutate(
+    y = 20 + 2.5 * time + 0.08 * age + if_else(sex == "M", 1, 0) +
+      b0 + b1 * time + rnorm(n(), mean = 0, sd = 2)
+  )
+
+glimpse(df)
+```
+
+## User inputs
+
+Edit these to match your own analysis.
+
+```{r}
+id_var <- "subject"
+term_of_interest <- "time"
+
+model_formula <- y ~ time + age + sex + (time | subject)
+```
+
+## Full model
+
+The full model is fitted once. `REML = FALSE` is used so that log likelihood and AIC are comparable across leave one subject out refits.
+
+`calc.derivs = FALSE` is used to reduce fitting overhead, because the sensitivity analysis only needs the fixed effect estimate, log likelihood, and AIC from each refit.
+
+```{r}
+ctrl_fast <- lmerControl(
+  optimizer = "nloptwrap",
+  calc.derivs = FALSE
+)
+
+fit_full <- lmer(
+  formula = model_formula,
+  data = df,
+  REML = FALSE,
+  control = ctrl_fast
+)
+
+summary(fit_full)
+```
+
+## Precompute quantities used in the sensitivity analysis
+
+```{r}
+subject_levels <- levels(df[[id_var]])
+subject_rows <- split(seq_len(nrow(df)), df[[id_var]])
+
+beta_full   <- unname(fixef(fit_full)[term_of_interest])
+se_full     <- unname(sqrt(diag(vcov(fit_full)))[term_of_interest])
+logLik_full <- as.numeric(logLik(fit_full))
+AIC_full    <- AIC(fit_full)
+
+n_fixed <- length(fixef(fit_full))
+
+dfbetas_threshold <- 2 / sqrt(length(subject_levels))
+likelihood_threshold <- qchisq(0.95, df = n_fixed)
+aic_threshold <- -2
+```
+
+## Parallel setup for Linux HPC
+
+For an interactive Linux Slurm session, the number of workers should not exceed the CPUs allocated to the job. It is usually sensible to leave one CPU free for the main R session.
+
+```{r}
+workers <- max(
+  1L,
+  as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "8")) - 1L
+)
+
+workers
+```
+
+## Fast leave one subject out refits using `mclapply`
+
+This implementation removes one subject at a time, refits the same model, and extracts only the quantities needed for the diagnostics.
+
+A `tryCatch` wrapper is included so that a failed refit does not stop the whole analysis.
+
+```{r}
+loo_results_list <- mclapply(subject_levels, function(s) {
+
+  drop_rows <- subject_rows[[s]]
+  keep_rows <- setdiff(seq_len(nrow(df)), drop_rows)
+  df_sub <- df[keep_rows, , drop = FALSE]
+
+  fit_loo <- tryCatch(
+    lmer(
+      formula = model_formula,
+      data = df_sub,
+      REML = FALSE,
+      control = lmerControl(
+        optimizer = "nloptwrap",
+        calc.derivs = FALSE
+      )
+    ),
+    error = function(e) NULL
+  )
+
+  if (is.null(fit_loo)) {
+    return(tibble(
+      subject = as.character(s),
+      n_rows_removed = length(drop_rows),
+      beta_loo = NA_real_,
+      delta_beta = NA_real_,
+      pct_change_beta = NA_real_,
+      dfbetas_time = NA_real_,
+      delta_logLik = NA_real_,
+      likelihood_distance = NA_real_,
+      delta_AIC = NA_real_,
+      fit_failed = TRUE
+    ))
+  }
+
+  beta_loo   <- unname(fixef(fit_loo)[term_of_interest])
+  logLik_loo <- as.numeric(logLik(fit_loo))
+  AIC_loo    <- AIC(fit_loo)
+
+  tibble(
+    subject = as.character(s),
+    n_rows_removed = length(drop_rows),
+    beta_loo = beta_loo,
+    delta_beta = beta_full - beta_loo,
+    pct_change_beta = 100 * (beta_loo - beta_full) / beta_full,
+    dfbetas_time = (beta_full - beta_loo) / se_full,
+    delta_logLik = logLik_full - logLik_loo,
+    likelihood_distance = 2 * (logLik_full - logLik_loo),
+    delta_AIC = AIC_loo - AIC_full,
+    fit_failed = FALSE
+  )
+
+}, mc.cores = workers)
+
+loo_results <- bind_rows(loo_results_list)
+
+loo_results
+```
+
+## Flag potentially influential subjects
+
+```{r}
+loo_results <- loo_results |>
+  mutate(
+    flag_dfbetas = !fit_failed & abs(dfbetas_time) > dfbetas_threshold,
+    flag_likelihood = !fit_failed & likelihood_distance > likelihood_threshold,
+    flag_aic = !fit_failed & delta_AIC < aic_threshold,
+    n_flags = flag_dfbetas + flag_likelihood + flag_aic
+  ) |>
+  arrange(desc(n_flags), desc(abs(dfbetas_time)))
+
+loo_results
+```
+
+## Thresholds used
+
+```{r}
+tibble(
+  metric = c("DFBETAS", "Likelihood distance", "Delta AIC"),
+  threshold = c(dfbetas_threshold, likelihood_threshold, aic_threshold),
+  interpretation = c(
+    "Absolute DFBETAS above threshold suggests influence on the fixed effect of interest",
+    "Values above threshold suggest strong global influence on the full mixed model",
+    "Values below threshold suggest better AIC after removing that subject"
+  )
+)
+```
+
+## Potentially problematic subjects
+
+```{r}
+problematic_ids <- loo_results |>
+  filter(!fit_failed, n_flags > 0) |>
+  arrange(desc(n_flags), desc(abs(dfbetas_time)))
+
+problematic_ids
+```
+
+## Any failed refits
+
+```{r}
+failed_refits <- loo_results |>
+  filter(fit_failed)
+
+failed_refits
+```
+
+## Overall summary
+
+```{r}
+summary_tab <- loo_results |>
+  summarise(
+    n_subjects = n(),
+    n_failed_refits = sum(fit_failed),
+    full_beta = beta_full,
+    max_abs_dfbetas = max(abs(dfbetas_time), na.rm = TRUE),
+    max_likelihood_distance = max(likelihood_distance, na.rm = TRUE),
+    min_delta_AIC = min(delta_AIC, na.rm = TRUE),
+    n_flagged_dfbetas = sum(flag_dfbetas, na.rm = TRUE),
+    n_flagged_likelihood = sum(flag_likelihood, na.rm = TRUE),
+    n_flagged_aic = sum(flag_aic, na.rm = TRUE),
+    n_flagged_any = sum(n_flags > 0, na.rm = TRUE)
+  )
+
+summary_tab
+```
+
+## Top subjects by each diagnostic
+
+These tables are often more useful than plotting all 2,000 subjects.
+
+### Top 20 by absolute DFBETAS
+
+```{r}
+loo_results |>
+  filter(!fit_failed) |>
+  arrange(desc(abs(dfbetas_time))) |>
+  slice_head(n = 20) |>
+  select(subject, beta_loo, dfbetas_time, likelihood_distance, delta_AIC, n_flags)
+```
+
+### Top 20 by likelihood distance
+
+```{r}
+loo_results |>
+  filter(!fit_failed) |>
+  arrange(desc(likelihood_distance)) |>
+  slice_head(n = 20) |>
+  select(subject, beta_loo, dfbetas_time, likelihood_distance, delta_AIC, n_flags)
+```
+
+### Top 20 by most negative delta AIC
+
+```{r}
+loo_results |>
+  filter(!fit_failed) |>
+  arrange(delta_AIC) |>
+  slice_head(n = 20) |>
+  select(subject, beta_loo, dfbetas_time, likelihood_distance, delta_AIC, n_flags)
+```
+
+## Plots for the top subjects only
+
+Plotting all subjects is usually not very informative for large datasets. These plots focus on the most extreme subjects.
+
+```{r}
+plot_n <- 50
+plot_dat <- loo_results |>
+  filter(!fit_failed) |>
+  arrange(desc(abs(dfbetas_time))) |>
+  slice_head(n = plot_n)
+```
+
+### DFBETAS
+
+```{r}
+ggplot(plot_dat, aes(x = reorder(subject, dfbetas_time), y = dfbetas_time)) +
+  geom_point() +
+  geom_hline(yintercept = c(-dfbetas_threshold, dfbetas_threshold), linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "DFBETAS",
+    title = paste("Top", plot_n, "subjects by absolute DFBETAS")
+  )
+```
+
+### Likelihood distance
+
+```{r}
+plot_dat_ld <- loo_results |>
+  filter(!fit_failed) |>
+  arrange(desc(likelihood_distance)) |>
+  slice_head(n = plot_n)
+
+ggplot(plot_dat_ld, aes(x = reorder(subject, likelihood_distance), y = likelihood_distance)) +
+  geom_point() +
+  geom_hline(yintercept = likelihood_threshold, linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "Likelihood distance",
+    title = paste("Top", plot_n, "subjects by likelihood distance")
+  )
+```
+
+### Delta AIC
+
+```{r}
+plot_dat_aic <- loo_results |>
+  filter(!fit_failed) |>
+  arrange(delta_AIC) |>
+  slice_head(n = plot_n)
+
+ggplot(plot_dat_aic, aes(x = reorder(subject, delta_AIC), y = delta_AIC)) +
+  geom_point() +
+  geom_hline(yintercept = c(-2, 2), linetype = 2) +
+  coord_flip() +
+  labs(
+    x = "Omitted subject",
+    y = "Delta AIC",
+    title = paste("Top", plot_n, "subjects by most negative delta AIC")
+  )
+```
+
+## Recommended interpretation
+
+Use **likelihood distance** as the primary diagnostic. Use **DFBETAS** and **delta AIC** as supporting diagnostics.
+
+Subjects flagged by more than one criterion are the strongest candidates for being disproportionately influential.
+
+In this framework:
+
+- large **likelihood distance** indicates that removing the subject materially changes the fitted model overall
+- large absolute **DFBETAS** indicates that the subject strongly affects the fixed effect of interest
+- strongly negative **delta AIC** indicates that model fit improves when the subject is removed
+
+## Minimal adaptation to your own data
+
+For your real dataset, you would usually only need to change the following:
+
+```{r eval=FALSE}
+id_var <- "ID"
+term_of_interest <- "time"
+model_formula <- outcome ~ time + covariate1 + covariate2 + (time | ID)
+```
+
+and replace the simulated `df` with your actual data frame.
+
+## Optional export
+
+```{r eval=FALSE}
+write.csv(loo_results, "loo_results.csv", row.names = FALSE)
+write.csv(problematic_ids, "problematic_ids.csv", row.names = FALSE)
+```
+
+## Reporting text
+
+You can use the following wording in a methods section:
+
+Sensitivity analysis was performed using a leave one subject out procedure. The linear mixed effects model was re fitted after excluding each subject in turn. Global influence was assessed using case deletion likelihood distance. DFBETAS for the fixed effect of interest and changes in AIC were used as supporting diagnostics. Subjects exceeding the prespecified thresholds were considered potentially influential.

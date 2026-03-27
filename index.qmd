@@ -9,6 +9,9 @@ This site contains practical R tutorials for statistics and data analysis, rende
 ## Available tutorials
 
 - [Linear Models versus Linear Mixed Models](tutorials/linear-mixed-models/index.html)
+- [Model Sensitivity Analysis with lmer](tutorials/model-sensitivity/index.html)
+- [Model Sensitivity Analysis Parallel](tutorials/model-sensitivity-parallel/index.html)
+- [Outlier identification and treatment](tutorials/outliers/index.html)
 
 ## About
 
